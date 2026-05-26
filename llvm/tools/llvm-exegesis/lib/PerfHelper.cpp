@@ -98,6 +98,95 @@ void PerfEvent::initRealEvent(StringRef PfmEventString) {
 #endif
 }
 
+// Accepts rNNNN hex form or field form (event=0x2e,umask=0x41[,...]).
+Expected<RawCounter> parseRawCounter(StringRef Spec) {
+  if (Spec.starts_with_insensitive("r")) {
+    uint64_t Config;
+    if (Spec.drop_front(1).getAsInteger(16, Config))
+      return make_error<StringError>("invalid raw counter spec",
+                                     errc::invalid_argument);
+    return RawCounter{PERF_TYPE_RAW, Config, 0, 0};
+  }
+
+  // Field form: event=0x2e,umask=0x41[,cmask=0x1,inv=1,edge=1]
+  uint64_t Event = 0, Umask = 0, Cmask = 0, Inv = 0, Edge = 0;
+  bool FoundEvent = false;
+  SmallVector<StringRef, 8> Fields;
+  Spec.split(Fields, ',');
+
+  for (StringRef Field : Fields) {
+    auto [Key, Value] = Field.split('=');
+    Key = Key.trim();
+    Value = Value.trim();
+
+    if (Key == "event") {
+      if (Value.getAsInteger(0, Event) || Event > 0xFF)
+        return make_error<StringError>(
+            "invalid event value (must be 0x00-0xFF)", errc::invalid_argument);
+      FoundEvent = true;
+    } else if (Key == "umask") {
+      if (Value.getAsInteger(0, Umask) || Umask > 0xFF)
+        return make_error<StringError>(
+            "invalid umask value (must be 0x00-0xFF)", errc::invalid_argument);
+    } else if (Key == "cmask") {
+      if (Value.getAsInteger(0, Cmask) || Cmask > 0xFF)
+        return make_error<StringError>(
+            "invalid cmask value (must be 0x00-0xFF)", errc::invalid_argument);
+    } else if (Key == "inv") {
+      if (Value.getAsInteger(0, Inv) || Inv > 1)
+        return make_error<StringError>("invalid inv value (must be 0 or 1)",
+                                       errc::invalid_argument);
+    } else if (Key == "edge") {
+      if (Value.getAsInteger(0, Edge) || Edge > 1)
+        return make_error<StringError>("invalid edge value (must be 0 or 1)",
+                                       errc::invalid_argument);
+    } else {
+      return make_error<StringError>("unknown field: " + Key.str(),
+                                     errc::invalid_argument);
+    }
+  }
+
+  if (!FoundEvent)
+    return make_error<StringError>("missing required field: event",
+                                   errc::invalid_argument);
+
+  // Assemble PERFEVTSEL config per Intel SDM layout.
+  uint64_t Config =
+      Event | (Umask << 8) | (Edge << 18) | (Inv << 23) | (Cmask << 24);
+  return RawCounter{PERF_TYPE_RAW, Config, 0, 0};
+}
+
+PerfEvent PerfEvent::fromRawConfig(uint32_t Type, uint64_t Config,
+                                   uint64_t Config1, uint64_t Config2,
+                                   StringRef Origin) {
+  PerfEvent E;
+  E.EventString = Origin.str();
+  E.FullQualifiedEventString = Origin.str();
+  E.initRawEvent(Type, Config, Config1, Config2);
+  return E;
+}
+
+void PerfEvent::initRawEvent(uint32_t Type, uint64_t Config, uint64_t Config1,
+                             uint64_t Config2) {
+#ifdef HAVE_LIBPFM
+  Attr = new perf_event_attr();
+  Attr->size = sizeof(*Attr);
+  Attr->type = Type;
+  Attr->config = Config;
+  Attr->config1 = Config1;
+  Attr->config2 = Config2;
+  Attr->read_format =
+      PERF_FORMAT_TOTAL_TIME_ENABLED | PERF_FORMAT_TOTAL_TIME_RUNNING;
+  Attr->exclude_kernel = 1;
+  Attr->exclude_hv = 1;
+}
+#else
+void PerfEvent::initRawEvent(uint32_t, uint64_t, uint64_t, uint64_t) {
+  // No libpfm: Attr remains null. Will fall back to dummy counters
+  // since perf_event_open is unavailable without libpfm support.
+}
+#endif
+
 StringRef PerfEvent::name() const { return EventString; }
 
 bool PerfEvent::valid() const { return !FullQualifiedEventString.empty(); }

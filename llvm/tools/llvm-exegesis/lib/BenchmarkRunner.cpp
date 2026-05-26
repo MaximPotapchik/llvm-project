@@ -57,10 +57,11 @@ namespace exegesis {
 BenchmarkRunner::BenchmarkRunner(const LLVMState &State, Benchmark::ModeE Mode,
                                  BenchmarkPhaseSelectorE BenchmarkPhaseSelector,
                                  ExecutionModeE ExecutionMode,
-                                 ArrayRef<ValidationEvent> ValCounters)
+                                 ArrayRef<ValidationEvent> ValCounters,
+                                 std::optional<pfm::RawCounter> CustomCounter)
     : State(State), Mode(Mode), BenchmarkPhaseSelector(BenchmarkPhaseSelector),
       ExecutionMode(ExecutionMode), ValidationCounters(ValCounters),
-      Scratch(std::make_unique<ScratchSpace>()) {}
+      CustomCounter(CustomCounter), Scratch(std::make_unique<ScratchSpace>()) {}
 
 BenchmarkRunner::~BenchmarkRunner() = default;
 
@@ -100,7 +101,8 @@ public:
   static Expected<std::unique_ptr<InProcessFunctionExecutorImpl>>
   create(const LLVMState &State, object::OwningBinary<object::ObjectFile> Obj,
          BenchmarkRunner::ScratchSpace *Scratch,
-         std::optional<int> BenchmarkProcessCPU) {
+         std::optional<int> BenchmarkProcessCPU,
+         std::optional<pfm::RawCounter> CustomCounter) {
     Expected<ExecutableFunction> EF =
         ExecutableFunction::create(State.createTargetMachine(), std::move(Obj));
 
@@ -108,14 +110,17 @@ public:
       return EF.takeError();
 
     return std::unique_ptr<InProcessFunctionExecutorImpl>(
-        new InProcessFunctionExecutorImpl(State, std::move(*EF), Scratch));
+        new InProcessFunctionExecutorImpl(State, std::move(*EF), Scratch,
+                                          CustomCounter));
   }
 
 private:
   InProcessFunctionExecutorImpl(const LLVMState &State,
                                 ExecutableFunction Function,
-                                BenchmarkRunner::ScratchSpace *Scratch)
-      : State(State), Function(std::move(Function)), Scratch(Scratch) {}
+                                BenchmarkRunner::ScratchSpace *Scratch,
+                                std::optional<pfm::RawCounter> CustomCounter)
+      : State(State), Function(std::move(Function)), Scratch(Scratch),
+        CustomCounter(CustomCounter) {}
 
   static void accumulateCounterValues(const SmallVector<int64_t, 4> &NewValues,
                                       SmallVector<int64_t, 4> *Result) {
@@ -132,7 +137,7 @@ private:
     const ExegesisTarget &ET = State.getExegesisTarget();
     char *const ScratchPtr = Scratch->ptr();
     auto CounterOrError =
-        ET.createCounter(CounterName, State, ValidationCounters);
+        ET.createCounter(CounterName, State, ValidationCounters, CustomCounter);
 
     if (!CounterOrError)
       return CounterOrError.takeError();
@@ -178,6 +183,7 @@ private:
   const LLVMState &State;
   const ExecutableFunction Function;
   BenchmarkRunner::ScratchSpace *const Scratch;
+  const std::optional<pfm::RawCounter> CustomCounter;
 };
 
 #ifdef __linux__
@@ -192,7 +198,8 @@ class SubProcessFunctionExecutorImpl
 public:
   static Expected<std::unique_ptr<SubProcessFunctionExecutorImpl>>
   create(const LLVMState &State, object::OwningBinary<object::ObjectFile> Obj,
-         const BenchmarkKey &Key, std::optional<int> BenchmarkProcessCPU) {
+         const BenchmarkKey &Key, std::optional<int> BenchmarkProcessCPU,
+         std::optional<pfm::RawCounter> CustomCounter) {
     Expected<ExecutableFunction> EF =
         ExecutableFunction::create(State.createTargetMachine(), std::move(Obj));
     if (!EF)
@@ -200,16 +207,17 @@ public:
 
     return std::unique_ptr<SubProcessFunctionExecutorImpl>(
         new SubProcessFunctionExecutorImpl(State, std::move(*EF), Key,
-                                           BenchmarkProcessCPU));
+                                           BenchmarkProcessCPU, CustomCounter));
   }
 
 private:
   SubProcessFunctionExecutorImpl(const LLVMState &State,
                                  ExecutableFunction Function,
                                  const BenchmarkKey &Key,
-                                 std::optional<int> BenchmarkCPU)
+                                 std::optional<int> BenchmarkCPU,
+                                 std::optional<pfm::RawCounter> Counter)
       : State(State), Function(std::move(Function)), Key(Key),
-        BenchmarkProcessCPU(BenchmarkCPU) {}
+        BenchmarkProcessCPU(BenchmarkCPU), CustomCounter(Counter) {}
 
   enum ChildProcessExitCodeE {
     CounterFDReadFailed = 1,
@@ -294,8 +302,8 @@ private:
                    SmallVectorImpl<int64_t> &ValidationCounterValues) const {
     scope_exit WriteFDClose([WriteFD]() { close(WriteFD); });
     const ExegesisTarget &ET = State.getExegesisTarget();
-    auto CounterOrError =
-        ET.createCounter(CounterName, State, ValidationCounters, ChildPID);
+    auto CounterOrError = ET.createCounter(
+        CounterName, State, ValidationCounters, CustomCounter, ChildPID);
 
     if (!CounterOrError)
       return CounterOrError.takeError();
@@ -587,6 +595,7 @@ private:
   const ExecutableFunction Function;
   const BenchmarkKey &Key;
   const std::optional<int> BenchmarkProcessCPU;
+  const std::optional<pfm::RawCounter> CustomCounter;
 };
 #endif // __linux__
 
@@ -761,7 +770,8 @@ BenchmarkRunner::createFunctionExecutor(
                                  "support benchmark core pinning.");
 
     auto InProcessExecutorOrErr = InProcessFunctionExecutorImpl::create(
-        State, std::move(ObjectFile), Scratch.get(), BenchmarkProcessCPU);
+        State, std::move(ObjectFile), Scratch.get(), BenchmarkProcessCPU,
+        CustomCounter);
     if (!InProcessExecutorOrErr)
       return InProcessExecutorOrErr.takeError();
 
@@ -770,7 +780,7 @@ BenchmarkRunner::createFunctionExecutor(
   case ExecutionModeE::SubProcess: {
 #ifdef __linux__
     auto SubProcessExecutorOrErr = SubProcessFunctionExecutorImpl::create(
-        State, std::move(ObjectFile), Key, BenchmarkProcessCPU);
+        State, std::move(ObjectFile), Key, BenchmarkProcessCPU, CustomCounter);
     if (!SubProcessExecutorOrErr)
       return SubProcessExecutorOrErr.takeError();
 

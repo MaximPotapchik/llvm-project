@@ -696,7 +696,8 @@ public:
   Expected<std::unique_ptr<pfm::CounterGroup>>
   createCounter(StringRef CounterName, const LLVMState &State,
                 ArrayRef<const char *> ValidationCounters,
-                const pid_t ProcessID) const override {
+                std::optional<pfm::RawCounter> CustomCounter = std::nullopt,
+                const pid_t ProcessID = 0) const override {
     // If LbrSamplingPeriod was provided, then ignore the
     // CounterName because we only have one for LBR.
     if (LbrSamplingPeriod > 0) {
@@ -721,7 +722,7 @@ public:
 #endif
     }
     return ExegesisTarget::createCounter(CounterName, State, ValidationCounters,
-                                         ProcessID);
+                                         CustomCounter, ProcessID);
   }
 
   enum ArgumentRegisters { CodeSize = X86::R12, AuxiliaryMemoryFD = X86::R13 };
@@ -771,7 +772,8 @@ private:
 
   uintptr_t getAuxiliaryMemoryStartAddress() const override;
 
-  std::vector<MCInst> configurePerfCounter(long Request, bool SaveRegisters) const override;
+  std::vector<MCInst> configurePerfCounter(long Request,
+                                           bool SaveRegisters) const override;
 
   std::vector<MCRegister> getArgumentRegisters() const override;
 
@@ -1274,7 +1276,8 @@ uintptr_t ExegesisX86Target::getAuxiliaryMemoryStartAddress() const {
 }
 
 std::vector<MCInst>
-ExegesisX86Target::configurePerfCounter(long Request, bool SaveRegisters) const {
+ExegesisX86Target::configurePerfCounter(long Request,
+                                        bool SaveRegisters) const {
   std::vector<MCInst> ConfigurePerfCounterCode;
   if (SaveRegisters)
     saveSyscallRegisters(ConfigurePerfCounterCode, 3);

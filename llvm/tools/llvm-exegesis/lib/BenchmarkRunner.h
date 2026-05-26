@@ -20,6 +20,7 @@
 #include "BenchmarkResult.h"
 #include "LlvmState.h"
 #include "MCInstrDescView.h"
+#include "PerfHelper.h"
 #include "SnippetRepetitor.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/MC/MCInst.h"
@@ -36,10 +37,11 @@ class BenchmarkRunner {
 public:
   enum ExecutionModeE { InProcess, SubProcess };
 
-  explicit BenchmarkRunner(const LLVMState &State, Benchmark::ModeE Mode,
-                           BenchmarkPhaseSelectorE BenchmarkPhaseSelector,
-                           ExecutionModeE ExecutionMode,
-                           ArrayRef<ValidationEvent> ValCounters);
+  explicit BenchmarkRunner(
+      const LLVMState &State, Benchmark::ModeE Mode,
+      BenchmarkPhaseSelectorE BenchmarkPhaseSelector,
+      ExecutionModeE ExecutionMode, ArrayRef<ValidationEvent> ValCounters,
+      std::optional<pfm::RawCounter> CustomCounter = std::nullopt);
 
   virtual ~BenchmarkRunner();
 
@@ -116,6 +118,7 @@ protected:
   const ExecutionModeE ExecutionMode;
 
   SmallVector<ValidationEvent> ValidationCounters;
+  std::optional<pfm::RawCounter> CustomCounter;
 
   Error
   getValidationCountersToRun(SmallVector<const char *> &ValCountersToRun) const;

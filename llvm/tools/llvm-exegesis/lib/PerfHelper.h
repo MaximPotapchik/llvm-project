@@ -22,6 +22,13 @@
 #include <cstdint>
 #include <functional>
 
+#ifdef HAVE_LIBPFM
+#include <perfmon/perf_event.h>
+#else
+// PERF_TYPE_RAW is 4 per the Linux perf_event ABI.
+static constexpr uint32_t PERF_TYPE_RAW = 4;
+#endif
+
 #ifdef _MSC_VER
 typedef int pid_t;
 #else
@@ -38,6 +45,15 @@ namespace pfm {
 bool pfmInitialize();
 void pfmTerminate();
 
+struct RawCounter {
+  uint32_t Type = PERF_TYPE_RAW;
+  uint64_t Config = 0;
+  uint64_t Config1 = 0;
+  uint64_t Config2 = 0;
+};
+
+Expected<RawCounter> parseRawCounter(StringRef RawCounterSpec);
+
 // Retrieves the encoding for the event described by pfm_event_string.
 // NOTE: pfm_initialize() must be called before creating PerfEvent objects.
 class PerfEvent {
@@ -48,6 +64,12 @@ public:
   // http://perfmon2.sourceforge.net/manv4/libpfm.html
   // Events are expressed as strings. e.g. "INSTRUCTION_RETIRED"
   explicit PerfEvent(StringRef PfmEventString);
+
+  // Construct a PerfEvent from a raw perf_event_attr config, bypassing
+  // libpfm's symbolic event lookup. 
+  static PerfEvent fromRawConfig(uint32_t Type, uint64_t Config,
+                                 uint64_t Config1, uint64_t Config2,
+                                 StringRef Origin);
 
   PerfEvent(const PerfEvent &) = delete;
   PerfEvent(PerfEvent &&other);
@@ -74,6 +96,8 @@ protected:
 
 private:
   void initRealEvent(StringRef PfmEventString);
+  void initRawEvent(uint32_t Type, uint64_t Config, uint64_t Config1,
+                    uint64_t Config2);
 };
 
 // Represents a single event that has been configured in the Linux perf

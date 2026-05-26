@@ -50,16 +50,13 @@ ExegesisTarget::getIgnoredOpcodeReasonOrNull(const LLVMState &State,
   return nullptr;
 }
 
-Expected<std::unique_ptr<pfm::CounterGroup>>
-ExegesisTarget::createCounter(StringRef CounterName, const LLVMState &,
-                              ArrayRef<const char *> ValidationCounters,
-                              const pid_t ProcessID) const {
-  pfm::PerfEvent Event(CounterName);
+static Expected<std::unique_ptr<pfm::CounterGroup>>
+makeCounterGroup(pfm::PerfEvent Event,
+                 ArrayRef<const char *> ValidationCounters, pid_t ProcessID) {
   if (!Event.valid())
     return make_error<Failure>(Twine("Unable to create counter with name '")
-                                   .concat(CounterName)
+                                   .concat(Event.name())
                                    .concat("'"));
-
   std::vector<pfm::PerfEvent> ValidationEvents;
   for (const char *ValCounterName : ValidationCounters) {
     ValidationEvents.emplace_back(ValCounterName);
@@ -69,9 +66,24 @@ ExegesisTarget::createCounter(StringRef CounterName, const LLVMState &,
               .concat(ValCounterName)
               .concat("'"));
   }
-
   return std::make_unique<pfm::CounterGroup>(
       std::move(Event), std::move(ValidationEvents), ProcessID);
+}
+
+Expected<std::unique_ptr<pfm::CounterGroup>>
+ExegesisTarget::createCounter(StringRef CounterName, const LLVMState &,
+                              ArrayRef<const char *> ValidationCounters,
+                              std::optional<pfm::RawCounter> CustomCounter,
+                              const pid_t ProcessID) const {
+  if (CustomCounter) {
+    return makeCounterGroup(pfm::PerfEvent::fromRawConfig(
+                                CustomCounter->Type, CustomCounter->Config,
+                                CustomCounter->Config1, CustomCounter->Config2,
+                                "custom-counter"),
+                            ValidationCounters, ProcessID);
+  }
+  return makeCounterGroup(pfm::PerfEvent(CounterName), ValidationCounters,
+                          ProcessID);
 }
 
 void ExegesisTarget::registerTarget(ExegesisTarget *Target) {
@@ -106,7 +118,8 @@ ExegesisTarget::createBenchmarkRunner(
     BenchmarkPhaseSelectorE BenchmarkPhaseSelector,
     BenchmarkRunner::ExecutionModeE ExecutionMode,
     unsigned BenchmarkRepeatCount, ArrayRef<ValidationEvent> ValidationCounters,
-    Benchmark::ResultAggregationModeE ResultAggMode) const {
+    Benchmark::ResultAggregationModeE ResultAggMode,
+    std::optional<pfm::RawCounter> CustomCounter) const {
   PfmCountersInfo PfmCounters = State.getPfmCounters();
   switch (Mode) {
   case Benchmark::Unknown:
@@ -114,10 +127,10 @@ ExegesisTarget::createBenchmarkRunner(
   case Benchmark::Latency:
   case Benchmark::InverseThroughput:
     if (BenchmarkPhaseSelector == BenchmarkPhaseSelectorE::Measure &&
-        !PfmCounters.CycleCounter) {
-      const char *ModeName = Mode == Benchmark::Latency
-                                 ? "latency"
-                                 : "inverse_throughput";
+        !PfmCounters.CycleCounter && !PfmCounters.CycleCounter &&
+        !CustomCounter) {
+      const char *ModeName =
+          Mode == Benchmark::Latency ? "latency" : "inverse_throughput";
       return make_error<Failure>(
           Twine("can't run '")
               .concat(ModeName)
@@ -129,10 +142,11 @@ ExegesisTarget::createBenchmarkRunner(
     }
     return createLatencyBenchmarkRunner(
         State, Mode, BenchmarkPhaseSelector, ResultAggMode, ExecutionMode,
-        ValidationCounters, BenchmarkRepeatCount);
+        ValidationCounters, BenchmarkRepeatCount, CustomCounter);
   case Benchmark::Uops:
     if (BenchmarkPhaseSelector == BenchmarkPhaseSelectorE::Measure &&
-        !PfmCounters.UopsCounter && !PfmCounters.IssueCounters)
+        !PfmCounters.UopsCounter && !PfmCounters.IssueCounters &&
+        !CustomCounter)
       return make_error<Failure>(
           "can't run 'uops' mode, sched model does not define uops or issue "
           "counters. You can pass --benchmark-phase=... to skip the actual "
@@ -140,7 +154,7 @@ ExegesisTarget::createBenchmarkRunner(
           "for real event counts.");
     return createUopsBenchmarkRunner(State, BenchmarkPhaseSelector,
                                      ResultAggMode, ExecutionMode,
-                                     ValidationCounters);
+                                     ValidationCounters, CustomCounter);
   }
   return nullptr;
 }
@@ -150,7 +164,8 @@ std::unique_ptr<SnippetGenerator> ExegesisTarget::createSerialSnippetGenerator(
   return std::make_unique<SerialSnippetGenerator>(State, Opts);
 }
 
-std::unique_ptr<SnippetGenerator> ExegesisTarget::createParallelSnippetGenerator(
+std::unique_ptr<SnippetGenerator>
+ExegesisTarget::createParallelSnippetGenerator(
     const LLVMState &State, const SnippetGenerator::Options &Opts) const {
   return std::make_unique<ParallelSnippetGenerator>(State, Opts);
 }
@@ -160,20 +175,22 @@ std::unique_ptr<BenchmarkRunner> ExegesisTarget::createLatencyBenchmarkRunner(
     BenchmarkPhaseSelectorE BenchmarkPhaseSelector,
     Benchmark::ResultAggregationModeE ResultAggMode,
     BenchmarkRunner::ExecutionModeE ExecutionMode,
-    ArrayRef<ValidationEvent> ValidationCounters,
-    unsigned BenchmarkRepeatCount) const {
+    ArrayRef<ValidationEvent> ValidationCounters, unsigned BenchmarkRepeatCount,
+    std::optional<pfm::RawCounter> CustomCounter) const {
   return std::make_unique<LatencyBenchmarkRunner>(
       State, Mode, BenchmarkPhaseSelector, ResultAggMode, ExecutionMode,
-      ValidationCounters, BenchmarkRepeatCount);
+      ValidationCounters, BenchmarkRepeatCount, CustomCounter);
 }
 
 std::unique_ptr<BenchmarkRunner> ExegesisTarget::createUopsBenchmarkRunner(
     const LLVMState &State, BenchmarkPhaseSelectorE BenchmarkPhaseSelector,
     Benchmark::ResultAggregationModeE /*unused*/,
     BenchmarkRunner::ExecutionModeE ExecutionMode,
-    ArrayRef<ValidationEvent> ValidationCounters) const {
+    ArrayRef<ValidationEvent> ValidationCounters,
+    std::optional<pfm::RawCounter> CustomCounter) const {
   return std::make_unique<UopsBenchmarkRunner>(
-      State, BenchmarkPhaseSelector, ExecutionMode, ValidationCounters);
+      State, BenchmarkPhaseSelector, ExecutionMode, ValidationCounters,
+      CustomCounter);
 }
 
 static_assert(std::is_trivial_v<PfmCountersInfo>,

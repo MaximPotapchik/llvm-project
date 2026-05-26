@@ -24,9 +24,10 @@ LatencyBenchmarkRunner::LatencyBenchmarkRunner(
     const LLVMState &State, Benchmark::ModeE Mode,
     BenchmarkPhaseSelectorE BenchmarkPhaseSelector,
     Benchmark::ResultAggregationModeE ResultAgg, ExecutionModeE ExecutionMode,
-    ArrayRef<ValidationEvent> ValCounters, unsigned BenchmarkRepeatCount)
+    ArrayRef<ValidationEvent> ValCounters, unsigned BenchmarkRepeatCount,
+    std::optional<pfm::RawCounter> CustomCounter)
     : BenchmarkRunner(State, Mode, BenchmarkPhaseSelector, ExecutionMode,
-                      ValCounters) {
+                      ValCounters, CustomCounter) {
   assert((Mode == Benchmark::Latency || Mode == Benchmark::InverseThroughput) &&
          "invalid mode");
   ResultAggMode = ResultAgg;

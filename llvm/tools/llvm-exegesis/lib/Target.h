@@ -84,6 +84,7 @@ public:
   virtual Expected<std::unique_ptr<pfm::CounterGroup>>
   createCounter(StringRef CounterName, const LLVMState &State,
                 ArrayRef<const char *> ValidationCounters,
+                std::optional<pfm::RawCounter> CustomCounter = std::nullopt,
                 const pid_t ProcessID = 0) const;
 
   // Targets can use this to add target-specific passes in assembleToStream();
@@ -268,8 +269,7 @@ public:
 
   // Creates a snippet generator for the given mode.
   std::unique_ptr<SnippetGenerator>
-  createSnippetGenerator(Benchmark::ModeE Mode,
-                         const LLVMState &State,
+  createSnippetGenerator(Benchmark::ModeE Mode, const LLVMState &State,
                          const SnippetGenerator::Options &Opts) const;
   // Creates a benchmark runner for the given mode.
   Expected<std::unique_ptr<BenchmarkRunner>> createBenchmarkRunner(
@@ -278,7 +278,8 @@ public:
       BenchmarkRunner::ExecutionModeE ExecutionMode,
       unsigned BenchmarkRepeatCount,
       ArrayRef<ValidationEvent> ValidationCounters,
-      Benchmark::ResultAggregationModeE ResultAggMode = Benchmark::Min) const;
+      Benchmark::ResultAggregationModeE ResultAggMode = Benchmark::Min,
+      std::optional<pfm::RawCounter> CustomCounter = std::nullopt) const;
 
   // Returns the ExegesisTarget for the given triple or nullptr if the target
   // does not exist.
@@ -323,12 +324,14 @@ private:
       Benchmark::ResultAggregationModeE ResultAggMode,
       BenchmarkRunner::ExecutionModeE ExecutionMode,
       ArrayRef<ValidationEvent> ValidationCounters,
-      unsigned BenchmarkRepeatCount) const;
+      unsigned BenchmarkRepeatCount,
+      std::optional<pfm::RawCounter> CustomCounter = std::nullopt) const;
   std::unique_ptr<BenchmarkRunner> virtual createUopsBenchmarkRunner(
       const LLVMState &State, BenchmarkPhaseSelectorE BenchmarkPhaseSelector,
       Benchmark::ResultAggregationModeE ResultAggMode,
       BenchmarkRunner::ExecutionModeE ExecutionMode,
-      ArrayRef<ValidationEvent> ValidationCounters) const;
+      ArrayRef<ValidationEvent> ValidationCounters,
+      std::optional<pfm::RawCounter> CustomCounter = std::nullopt) const;
 
   const ExegesisTarget *Next = nullptr;
   const ArrayRef<CpuAndPfmCounters> CpuPfmCounters;

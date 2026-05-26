@@ -22,12 +22,13 @@ namespace exegesis {
 
 class LatencyBenchmarkRunner : public BenchmarkRunner {
 public:
-  LatencyBenchmarkRunner(const LLVMState &State, Benchmark::ModeE Mode,
-                         BenchmarkPhaseSelectorE BenchmarkPhaseSelector,
-                         Benchmark::ResultAggregationModeE ResultAggMode,
-                         ExecutionModeE ExecutionMode,
-                         ArrayRef<ValidationEvent> ValCounters,
-                         unsigned BenchmarkRepeatCount);
+  LatencyBenchmarkRunner(
+      const LLVMState &State, Benchmark::ModeE Mode,
+      BenchmarkPhaseSelectorE BenchmarkPhaseSelector,
+      Benchmark::ResultAggregationModeE ResultAggMode,
+      ExecutionModeE ExecutionMode, ArrayRef<ValidationEvent> ValCounters,
+      unsigned BenchmarkRepeatCount,
+      std::optional<pfm::RawCounter> CustomCounter = std::nullopt);
   ~LatencyBenchmarkRunner() override;
 
 private:

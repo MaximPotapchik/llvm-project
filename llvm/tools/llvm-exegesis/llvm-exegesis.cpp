@@ -278,10 +278,17 @@ static cl::opt<std::string> MAttr(
     "mattr", cl::desc("comma-separated list of target architecture features"),
     cl::value_desc("+feature1,-feature2,..."), cl::cat(Options), cl::init(""));
 
+static cl::opt<std::string> CustomCounter(
+    "custom-counter",
+    cl::desc("Measure a raw PMU event, bypassing libpfm symbolic lookup. "
+             "Accepts perf-style raw specs, e.g. 'r412e' or "
+             "'event=0x2e,umask=0x41'."),
+    cl::cat(BenchmarkOptions), cl::init(""));
+
 static ExitOnError ExitOnErr("llvm-exegesis error: ");
 
 // Helper function that logs the error(s) and exits.
-template <typename... ArgTs> static void ExitWithError(ArgTs &&... Args) {
+template <typename... ArgTs> static void ExitWithError(ArgTs &&...Args) {
   ExitOnErr(make_error<Failure>(std::forward<ArgTs>(Args)...));
 }
 
@@ -444,8 +451,7 @@ static void runBenchmarkConfigurations(
     Benchmark &Result = AllResults.front();
 
     // If any of our measurements failed, pretend they all have failed.
-    if (AllResults.size() > 1 &&
-        any_of(AllResults, [](const Benchmark &R) {
+    if (AllResults.size() > 1 && any_of(AllResults, [](const Benchmark &R) {
           return R.Measurements.empty();
         }))
       Result.Measurements.clear();
@@ -478,7 +484,13 @@ void benchmarkMain() {
       ExitWithError("cannot initialize libpfm");
 #endif
   }
-
+  std::optional<pfm::RawCounter> ParsedCustomCounter;
+  if (!CustomCounter.empty()) {
+    auto RawOrErr = pfm::parseRawCounter(CustomCounter);
+    if (!RawOrErr)
+      ExitOnErr(RawOrErr.takeError());
+    ParsedCustomCounter = *RawOrErr;
+  }
   InitializeAllExegesisTargets();
 #define LLVM_EXEGESIS(TargetName)                                              \
   LLVMInitialize##TargetName##AsmPrinter();                                    \
@@ -502,7 +514,8 @@ void benchmarkMain() {
   const std::unique_ptr<BenchmarkRunner> Runner =
       ExitOnErr(State.getExegesisTarget().createBenchmarkRunner(
           BenchmarkMode, State, BenchmarkPhaseSelector, ExecutionMode,
-          BenchmarkRepeatCount, ValidationCounters, ResultAggMode));
+          BenchmarkRepeatCount, ValidationCounters, ResultAggMode,
+          ParsedCustomCounter));
   if (!Runner) {
     ExitWithError("cannot create benchmark runner");
   }
@@ -644,8 +657,7 @@ static void analysisMain() {
       errorOrToExpected(MemoryBuffer::getFile(BenchmarkFile, /*IsText=*/true)));
 
   const auto TriplesAndCpus = ExitOnFileError(
-      BenchmarkFile,
-      Benchmark::readTriplesAndCpusFromYamls(*MemoryBuffer));
+      BenchmarkFile, Benchmark::readTriplesAndCpusFromYamls(*MemoryBuffer));
   if (TriplesAndCpus.empty()) {
     errs() << "no benchmarks to analyze\n";
     return;

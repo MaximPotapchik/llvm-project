@@ -22,12 +22,12 @@ namespace exegesis {
 
 class UopsBenchmarkRunner : public BenchmarkRunner {
 public:
-  UopsBenchmarkRunner(const LLVMState &State,
-                      BenchmarkPhaseSelectorE BenchmarkPhaseSelector,
-                      ExecutionModeE ExecutionMode,
-                      ArrayRef<ValidationEvent> ValCounters)
+  UopsBenchmarkRunner(
+      const LLVMState &State, BenchmarkPhaseSelectorE BenchmarkPhaseSelector,
+      ExecutionModeE ExecutionMode, ArrayRef<ValidationEvent> ValCounters,
+      std::optional<pfm::RawCounter> CustomCounter = std::nullopt)
       : BenchmarkRunner(State, Benchmark::Uops, BenchmarkPhaseSelector,
-                        ExecutionMode, ValCounters) {}
+                        ExecutionMode, ValCounters, CustomCounter) {}
   ~UopsBenchmarkRunner() override;
 
   static constexpr size_t kMinNumDifferentAddresses = 6;
